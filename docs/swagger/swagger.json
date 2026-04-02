@@ -2,14 +2,84 @@
   "openapi": "3.0.1",
   "info": {
     "title": "Fiap Arch Analyzer API Gateway",
-    "version": "v1"
+    "version": "v1",
+    "description": "Exposes endpoints for uploading software architecture diagrams and retrieving AI-generated analysis reports."
   },
   "paths": {
     "/test": {
       "get": {
+        "summary": "Check API Gateway status",
         "responses": {
           "200": {
             "description": "API Gateway is working!"
+          }
+        }
+      }
+    },
+    "/diagrams": {
+      "post": {
+        "summary": "Upload a software architecture diagram",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Diagram received and analysis started."
+          },
+          "400": {
+            "description": "No file uploaded."
+          }
+        }
+      }
+    },
+    "/analyses/{id}/status": {
+      "get": {
+        "summary": "Get analysis status",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns the current status of the analysis."
+          }
+        }
+      }
+    },
+    "/analyses/{id}/report": {
+      "get": {
+        "summary": "Get analysis report",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns the AI-generated report for the architecture diagram."
           }
         }
       }
