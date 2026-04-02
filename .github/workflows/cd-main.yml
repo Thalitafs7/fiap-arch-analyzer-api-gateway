@@ -1,0 +1,185 @@
+name: CD Main
+
+on:
+  push:
+    branches: [ "Main" ]
+  pull_request:
+    branches: [ "Main" ]
+
+env:
+  AWS_REGION: 'us-east-1'
+  ECR_REPOSITORY: 'mecanicaos-ecr'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.get_sha.outputs.sha }}
+      owner_lowercase: ${{ steps.convert_owner.outputs.name }}
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Login no GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Obter o SHA do commit
+        id: get_sha
+        run: echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Converter nome do repositório para minúsculas
+        id: convert_owner
+        run: echo "name=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Construir e enviar a imagem Docker para GHCR
+        run: |
+          if [ -f Dockerfile ]; then
+            docker build . --file Dockerfile --tag ghcr.io/${{ steps.convert_owner.outputs.name }}/mecanicaos-api:${{ steps.get_sha.outputs.sha }} --tag ghcr.io/${{ steps.convert_owner.outputs.name }}/mecanicaos-api:latest
+            docker push ghcr.io/${{ steps.convert_owner.outputs.name }}/mecanicaos-api:${{ steps.get_sha.outputs.sha }}
+            docker push ghcr.io/${{ steps.convert_owner.outputs.name }}/mecanicaos-api:latest
+          else
+            echo "Dockerfile not found, skipping build"
+          fi
+
+      # Push para ECR (se credenciais AWS estiverem configuradas)
+      - name: Configurar credenciais AWS
+        if: github.event_name == 'push' && github.ref == 'refs/heads/Main'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+        continue-on-error: true
+
+      - name: Login no Amazon ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/Main'
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+        continue-on-error: true
+
+      - name: Push para ECR
+        if: steps.login-ecr.outcome == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/Main'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          if [ -f Dockerfile ]; then
+            docker tag ghcr.io/${{ steps.convert_owner.outputs.name }}/mecanicaos-api:${{ steps.get_sha.outputs.sha }} ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${{ steps.get_sha.outputs.sha }}
+            docker tag ghcr.io/${{ steps.convert_owner.outputs.name }}/mecanicaos-api:latest ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:latest
+            docker push ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${{ steps.get_sha.outputs.sha }}
+            docker push ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:latest
+            echo "✅ Imagem enviada para ECR: ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${{ steps.get_sha.outputs.sha }}"
+          fi
+
+  validate-k8s-manifests:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Atualizar a tag da imagem no manifesto de deploy
+        run: |
+          if [ -f k8s/api-deployment.yaml ]; then
+            echo "A nova tag da imagem é: ${{ needs.build-and-push.outputs.image_tag }}"
+            sed -i "s|image:.*|image: ghcr.io/${{ needs.build-and-push.outputs.owner_lowercase }}/mecanicaos-api:${{ needs.build-and-push.outputs.image_tag }}|g" k8s/api-deployment.yaml
+            echo "Manifesto de deploy da API atualizado:"
+            cat k8s/api-deployment.yaml
+          fi
+
+      - name: Instalar Kubeconform
+        run: |
+          echo "Instalando Kubeconform..."
+          curl -L https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz -o kubeconform.tar.gz
+          tar xf kubeconform.tar.gz
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Validar manifestos do Kubernetes
+        run: |
+          if [ -d k8s/ ]; then
+            echo "🔍 Validando manifestos com Kubeconform..."
+            kubeconform -strict -ignore-missing-schemas -summary \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/{{.NormalizedKubernetesVersion}}-standalone-strict/{{.ResourceKind}}.json' \
+              -kubernetes-version 1.30.0 k8s/
+          else
+            echo "k8s directory not found, skipping validation"
+          fi
+
+  deploy-eks:
+    name: 'Deploy to EKS'
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/Main'
+
+    steps:
+      - name: Configurar credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+        continue-on-error: true
+
+      - name: Verificar credenciais AWS
+        id: check-aws
+        run: |
+          if aws sts get-caller-identity > /dev/null 2>&1; then
+            echo "aws_valid=true" >> $GITHUB_OUTPUT
+            echo "✅ Credenciais AWS válidas"
+          else
+            echo "aws_valid=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Credenciais AWS inválidas ou expiradas - pulando deploy"
+          fi
+
+      - name: Configurar kubectl
+        if: steps.check-aws.outputs.aws_valid == 'true'
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name eks-mecanicaos
+          echo "✅ kubectl configurado para eks-mecanicaos"
+
+      - name: Atualizar imagem e reiniciar pods
+        if: steps.check-aws.outputs.aws_valid == 'true'
+        env:
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+        run: |
+          echo "🚀 Atualizando deployment com nova imagem..."
+
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_IMAGE="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
+
+          echo "Nova imagem: ${ECR_IMAGE}"
+
+          kubectl set image deployment/mecanicaos-api \
+            mecanicaos-api=${ECR_IMAGE} \
+            -n mecanicaos
+
+          echo "⏳ Aguardando rollout..."
+          kubectl rollout status deployment/mecanicaos-api -n mecanicaos --timeout=300s
+
+          echo "✅ Deploy concluído!"
+
+      - name: Verificar status do deploy
+        if: steps.check-aws.outputs.aws_valid == 'true'
+        run: |
+          echo "📊 Status dos pods:"
+          kubectl get pods -n mecanicaos
+
+          LB_URL=$(kubectl get svc mecanicaos-service -n mecanicaos -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "Swagger UI: http://${LB_URL}/docs"
+
+          echo "## Deploy Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag:** ${{ needs.build-and-push.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Swagger UI:** http://${LB_URL}/docs" >> $GITHUB_STEP_SUMMARY
+
+      - name: Deploy pulado (credenciais inválidas)
+        if: steps.check-aws.outputs.aws_valid != 'true'
+        run: |
+          echo "⚠️ Deploy pulado - credenciais AWS não configuradas ou expiradas"
+          echo "## ⚠️ Deploy Pulado" >> $GITHUB_STEP_SUMMARY
+          echo "Credenciais AWS não configuradas ou expiradas." >> $GITHUB_STEP_SUMMARY
