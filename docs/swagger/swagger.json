@@ -1,0 +1,18 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Fiap Arch Analyzer API Gateway",
+    "version": "v1"
+  },
+  "paths": {
+    "/test": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "API Gateway is working!"
+          }
+        }
+      }
+    }
+  }
+}
