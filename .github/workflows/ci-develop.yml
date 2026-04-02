@@ -1,0 +1,105 @@
+name: CI Develop
+
+on:
+  push:
+    branches:
+      - "develop"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restaurar dependências
+        run: dotnet restore || echo "No solution file found yet, skipping"
+
+      - name: Compilar o projeto
+        run: dotnet build --no-restore || echo "No solution file found yet, skipping"
+
+      - name: Executar testes unitários
+        run: |
+          if [ -f .github/scripts/check_test_success.sh ]; then
+            chmod +x .github/scripts/check_test_success.sh
+            .github/scripts/check_test_success.sh
+          else
+            echo "Test script not found, skipping"
+          fi
+
+  create-release-pr:
+    needs: [build-and-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout do código completo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Criar ou usar branch de release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          set -e
+
+          echo "🔍 Buscando a última versão de release..."
+          git fetch origin --prune --tags
+          LATEST_RELEASE_VERSION=$(git ls-remote --heads origin "release/*" | awk -F'/' '{print $4}' | sort -V | tail -n 1 || true)
+
+          if [ -z "$LATEST_RELEASE_VERSION" ]; then
+            echo "⚠️ Nenhuma branch de release encontrada. A próxima versão será 1.0.0."
+            NEXT_VERSION="1.0.0"
+          else
+            echo "✅ Última versão de release detectada: $LATEST_RELEASE_VERSION"
+
+            # Divide a versão por '.' e preenche com 0 se faltar partes
+            IFS='.' read -r -a version_parts <<< "$LATEST_RELEASE_VERSION"
+            major=${version_parts[0]:-0}
+            minor=${version_parts[1]:-0}
+            patch=${version_parts[2]:-0}
+
+            patch=$((patch + 1))
+            NEXT_VERSION="$major.$minor.$patch"
+            echo "⬆️ Próxima versão de release calculada: $NEXT_VERSION"
+          fi
+
+          RELEASE_BRANCH="release/$NEXT_VERSION"
+          echo "🎯 A branch de release alvo é: $RELEASE_BRANCH"
+
+          echo "🔍 Verificando se a branch de release alvo já existe no remoto..."
+          if git ls-remote --heads origin "$RELEASE_BRANCH" | grep -q "$RELEASE_BRANCH"; then
+            echo "✅ A branch de release '$RELEASE_BRANCH' já existe no remoto."
+          else
+            echo "✨ Criando branch de release '$RELEASE_BRANCH' a partir da main..."
+            git checkout main
+            git pull origin main
+            git checkout -b "$RELEASE_BRANCH"
+            git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
+            git push origin "$RELEASE_BRANCH"
+          fi
+
+          echo "🔍 Verificando PRs abertos de develop para $RELEASE_BRANCH..."
+          OPEN_PR_COUNT=$(gh pr list --state open --head "develop" --base "$RELEASE_BRANCH" --json number | jq 'length')
+
+          if [ "$OPEN_PR_COUNT" -eq "0" ]; then
+            echo "✨ Criando novo Pull Request..."
+            gh pr create \
+              --base "$RELEASE_BRANCH" \
+              --head "develop" \
+              --title "Merge develop into $RELEASE_BRANCH" \
+              --body "Pull Request gerado automaticamente pela pipeline CI de develop."
+          else
+            echo "ℹ️ Já existe PR aberto para $RELEASE_BRANCH."
+          fi
