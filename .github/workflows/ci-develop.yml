@@ -50,8 +50,9 @@ jobs:
 
       - name: Criar ou usar branch de release
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          sudo apt-get update && sudo apt-get install -y jq
           set -e
 
           echo "🔍 Buscando a última versão de release..."
@@ -86,7 +87,6 @@ jobs:
             git checkout main
             git pull origin main
             git checkout -b "$RELEASE_BRANCH"
-            git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
             git push origin "$RELEASE_BRANCH"
           fi
 

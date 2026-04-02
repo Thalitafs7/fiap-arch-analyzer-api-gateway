@@ -50,8 +50,9 @@ jobs:
 
       - name: Criar Pull Request para Main
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          sudo apt-get update && sudo apt-get install -y jq
           set -e
 
           TARGET_BRANCH="main"
