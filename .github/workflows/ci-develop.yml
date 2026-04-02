@@ -50,7 +50,7 @@ jobs:
 
       - name: Criar ou usar branch de release
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           set -e
 
@@ -91,9 +91,10 @@ jobs:
           fi
 
           echo "🔍 Verificando PRs abertos de develop para $RELEASE_BRANCH..."
-          OPEN_PR_COUNT=$(gh pr list --state open --head "develop" --base "$RELEASE_BRANCH" --json number | jq 'length')
+          PR_LIST=$(gh pr list --state open --head "develop" --base "$RELEASE_BRANCH" --json number)
+          OPEN_PR_COUNT=$(echo "$PR_LIST" | jq 'length')
 
-          if [ "$OPEN_PR_COUNT" -eq "0" ]; then
+          if [ -z "$OPEN_PR_COUNT" ] || [ "$OPEN_PR_COUNT" -eq 0 ]; then
             echo "✨ Criando novo Pull Request..."
             gh pr create \
               --base "$RELEASE_BRANCH" \

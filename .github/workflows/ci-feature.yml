@@ -58,7 +58,7 @@ jobs:
 
       - name: Criar Pull Request para develop
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           set -e
 
@@ -82,9 +82,10 @@ jobs:
           fi
 
           echo "🔍 Verificando PRs abertos..."
-          OPEN_PR_COUNT=$(gh pr list --state open --head "$SOURCE_BRANCH" --base "$TARGET_BRANCH" --json number | jq 'length')
+          PR_LIST=$(gh pr list --state open --head "$SOURCE_BRANCH" --base "$TARGET_BRANCH" --json number)
+          OPEN_PR_COUNT=$(echo "$PR_LIST" | jq 'length')
 
-          if [ "$OPEN_PR_COUNT" -eq "0" ]; then
+          if [ -z "$OPEN_PR_COUNT" ] || [ "$OPEN_PR_COUNT" -eq 0 ]; then
             echo "✨ Criando novo Pull Request para $TARGET_BRANCH..."
             gh pr create \
               --base "$TARGET_BRANCH" \
