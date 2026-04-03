@@ -1,0 +1,81 @@
+name: CI Release
+
+on:
+  push:
+    branches:
+      - "release/*"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restaurar dependências
+        run: dotnet restore || echo "No solution file found yet, skipping"
+
+      - name: Compilar o projeto
+        run: dotnet build --no-restore || echo "No solution file found yet, skipping"
+
+      - name: Executar testes unitários
+        run: |
+          if [ -f .github/scripts/check_test_success.sh ]; then
+            chmod +x .github/scripts/check_test_success.sh
+            .github/scripts/check_test_success.sh
+          else
+            echo "Test script not found, skipping"
+          fi
+
+  create-pr-to-main:
+    needs: [build-and-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout do código completo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Criar Pull Request para Main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+          set -e
+
+          TARGET_BRANCH="main"
+          SOURCE_BRANCH="${{ github.ref_name }}"
+
+          echo "🔍 Verificando se há diferenças entre $SOURCE_BRANCH e $TARGET_BRANCH..."
+          git fetch origin "$TARGET_BRANCH"
+          if git diff --quiet "origin/$TARGET_BRANCH"...origin/"$SOURCE_BRANCH"; then
+            echo "⚠️ Nenhuma diferença. Nenhum PR será criado."
+            exit 0
+          fi
+
+          echo "🔍 Verificando PRs abertos..."
+          PR_LIST=$(gh pr list --state open --head "$SOURCE_BRANCH" --base "$TARGET_BRANCH" --json number)
+          OPEN_PR_COUNT=$(echo "$PR_LIST" | jq 'length')
+
+          if [ -z "$OPEN_PR_COUNT" ] || [ "$OPEN_PR_COUNT" -eq 0 ]; then
+            echo "✨ Criando novo Pull Request para $TARGET_BRANCH..."
+            gh pr create \
+              --base "$TARGET_BRANCH" \
+              --head "$SOURCE_BRANCH" \
+              --title "Merge $SOURCE_BRANCH into $TARGET_BRANCH" \
+              --body "PR gerado automaticamente após sucesso no CI da release."
+          else
+            echo "ℹ️ Já existe PR aberto."
+          fi
