@@ -65,13 +65,40 @@ jobs:
           else
             echo "✅ Última versão de release detectada: $LATEST_RELEASE_VERSION"
 
+            # Analisar a mensagem do último commit na develop para decidir o incremento (Semantic Versioning)
+            # BREAKING CHANGE ou ! -> MAJOR
+            # feat: -> MINOR
+            # Outros (fix, docs, refactor, etc) -> PATCH
+
+            LAST_COMMIT_MSG=$(git log -1 --pretty=%B)
+            echo "📝 Mensagem do último commit: $LAST_COMMIT_MSG"
+
+            INCREMENT="patch"
+            if echo "$LAST_COMMIT_MSG" | grep -Eq "BREAKING CHANGE|!"; then
+              INCREMENT="major"
+            elif echo "$LAST_COMMIT_MSG" | grep -iq "^feat"; then
+              INCREMENT="minor"
+            fi
+
+            echo "📈 Tipo de incremento detectado: $INCREMENT"
+
             # Divide a versão por '.' e preenche com 0 se faltar partes
             IFS='.' read -r -a version_parts <<< "$LATEST_RELEASE_VERSION"
             major=${version_parts[0]:-0}
             minor=${version_parts[1]:-0}
             patch=${version_parts[2]:-0}
 
-            patch=$((patch + 1))
+            if [ "$INCREMENT" == "major" ]; then
+              major=$((major + 1))
+              minor=0
+              patch=0
+            elif [ "$INCREMENT" == "minor" ]; then
+              minor=$((minor + 1))
+              patch=0
+            else
+              patch=$((patch + 1))
+            fi
+
             NEXT_VERSION="$major.$minor.$patch"
             echo "⬆️ Próxima versão de release calculada: $NEXT_VERSION"
           fi
