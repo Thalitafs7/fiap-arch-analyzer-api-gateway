@@ -58,8 +58,9 @@ jobs:
 
       - name: Criar Pull Request para develop
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          sudo apt-get update && sudo apt-get install -y jq
           set -e
 
           TARGET_BRANCH="develop"
@@ -70,7 +71,6 @@ jobs:
             echo "✨ A branch $TARGET_BRANCH não existe. Criando a partir da main..."
             git checkout main
             git checkout -b "$TARGET_BRANCH"
-            git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
             git push origin "$TARGET_BRANCH"
           fi
 
@@ -82,9 +82,10 @@ jobs:
           fi
 
           echo "🔍 Verificando PRs abertos..."
-          OPEN_PR_COUNT=$(gh pr list --state open --head "$SOURCE_BRANCH" --base "$TARGET_BRANCH" --json number | jq 'length')
+          PR_LIST=$(gh pr list --state open --head "$SOURCE_BRANCH" --base "$TARGET_BRANCH" --json number)
+          OPEN_PR_COUNT=$(echo "$PR_LIST" | jq 'length')
 
-          if [ "$OPEN_PR_COUNT" -eq "0" ]; then
+          if [ -z "$OPEN_PR_COUNT" ] || [ "$OPEN_PR_COUNT" -eq 0 ]; then
             echo "✨ Criando novo Pull Request para $TARGET_BRANCH..."
             gh pr create \
               --base "$TARGET_BRANCH" \
