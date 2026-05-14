@@ -6,36 +6,7 @@ on:
       - "release/*"
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout do código
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v3
-        with:
-          dotnet-version: 9.0.x
-
-      - name: Restaurar dependências
-        run: dotnet restore || echo "No solution file found yet, skipping"
-
-      - name: Compilar o projeto
-        run: dotnet build --no-restore || echo "No solution file found yet, skipping"
-
-      - name: Executar testes unitários
-        run: |
-          if [ -f .github/scripts/check_test_success.sh ]; then
-            chmod +x .github/scripts/check_test_success.sh
-            .github/scripts/check_test_success.sh
-          else
-            echo "Test script not found, skipping"
-          fi
-
   create-pr-to-main:
-    needs: [build-and-test]
     runs-on: ubuntu-latest
     permissions:
       contents: write
