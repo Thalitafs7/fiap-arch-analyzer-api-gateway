@@ -14,25 +14,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v3
-        with:
-          dotnet-version: 9.0.x
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
 
-      - name: Restaurar dependências
-        run: dotnet restore || echo "No solution file found yet, skipping"
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./infra/terraform
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
 
-      - name: Compilar o projeto
-        run: dotnet build --no-restore || echo "No solution file found yet, skipping"
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: ./infra/terraform
 
-      - name: Executar testes unitários
-        run: |
-          if [ -f .github/scripts/check_test_success.sh ]; then
-            chmod +x .github/scripts/check_test_success.sh
-            .github/scripts/check_test_success.sh
-          else
-            echo "Test script not found, skipping"
-          fi
+      - name: Terraform Plan
+        run: terraform plan -var="aws_region=us-east-1"
+        working-directory: ./infra/terraform
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
 
   create-pr-to-main:
     needs: [build-and-test]
