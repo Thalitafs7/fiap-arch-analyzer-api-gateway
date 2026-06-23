@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-config
+  namespace: arch-analyzer-api
+  labels:
+    app.kubernetes.io/name: api-gateway
+    app.kubernetes.io/part-of: arch-analyzer
+    app.kubernetes.io/component: gateway
+data:
+  ASPNETCORE_ENVIRONMENT: "Production"
+
+  # YARP reverse proxy cluster destinations
+  # All addresses use in-cluster DNS — no AWS literal values here.
+  ReverseProxy__Clusters__auth__Destinations__d1__Address: "http://ms-auth-service.auth.svc.cluster.local:5002"
+  ReverseProxy__Clusters__registration__Destinations__d1__Address: "http://registration-service.arch-analyzer-api.svc.cluster.local:5002"
+  ReverseProxy__Clusters__processing__Destinations__d1__Address: "http://processing-service.arch-analyzer-ia.svc.cluster.local:8000"
+  ReverseProxy__Clusters__report__Destinations__d1__Address: "http://report-service.arch-analyzer-ia.svc.cluster.local:8001"
+
+  Logging__LogLevel__Microsoft.AspNetCore: "Information"
